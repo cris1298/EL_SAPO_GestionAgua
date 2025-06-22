@@ -6,19 +6,22 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
+
 namespace EL_SAPO_GestionAgua.Forms
 {
     public partial class GenerarFacturaForm : Form
     {
-        private TextBox txtDNI, txtLecturaAnterior, txtLecturaActual, txtPeriodo, txtObservaciones;
+        private TextBox txtDNI, txtLecturaAnterior, txtLecturaActual, txtPeriodo, txtObservaciones, txtMantenimiento;
         private DateTimePicker dtpVencimiento;
         private CheckBox chkReposicion;
-        private Label lblConsumo, lblCosto, lblClienteInfo;
-        private Button btnBuscar, btnGenerar;
+        private Label lblConsumo, lblCosto, lblClienteInfo, lblMantenimiento;
+        private Button btnBuscar, btnGenerar, btnImprimir;
         private GroupBox grpCliente, grpLecturas, grpDetalles;
         private Panel pnlResultados;
 
-        private bool esPrimeraFactura = true; // ← se usa en todo el form
+        private bool esPrimeraFactura = true;
+        private Factura ultimaFacturaGenerada = null;
+        private Usuario clienteActual = null;
 
         public GenerarFacturaForm()
         {
@@ -30,7 +33,7 @@ namespace EL_SAPO_GestionAgua.Forms
         {
             // Configuración principal del formulario
             this.Text = "🧾 Generar Factura de Agua";
-            this.Size = new Size(580, 720);
+            this.Size = new Size(580, 800);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -91,7 +94,7 @@ namespace EL_SAPO_GestionAgua.Forms
 
             currentY += grpCliente.Height + groupSpacing;
 
-            // Grupo: Lecturas del Medidor
+            // Grupo: Lecturas del Medidor (ACTUALIZADO)
             grpLecturas = CreateStyledGroupBox("📊 Lecturas del Medidor", currentY, 520);
             mainPanel.Controls.Add(grpLecturas);
 
@@ -115,6 +118,17 @@ namespace EL_SAPO_GestionAgua.Forms
             txtLecturaActual.TextAlign = HorizontalAlignment.Center;
             txtLecturaActual.TextChanged += TxtLecturaActual_TextChanged;
             grpLecturas.Controls.Add(txtLecturaActual);
+
+            // NUEVO: Campo de Mantenimiento
+            lblMantenimiento = CreateStyledLabel("Mantenimiento (S/):", 300, 25);
+            grpLecturas.Controls.Add(lblMantenimiento);
+
+            txtMantenimiento = CreateStyledTextBox(300, 45, 100);
+            txtMantenimiento.Text = "1.00";
+            txtMantenimiento.Font = new Font("Consolas", 10F, FontStyle.Bold);
+            txtMantenimiento.TextAlign = HorizontalAlignment.Center;
+            txtMantenimiento.TextChanged += TxtMantenimiento_TextChanged;
+            grpLecturas.Controls.Add(txtMantenimiento);
 
             // Panel de resultados
             pnlResultados = new Panel()
@@ -223,16 +237,26 @@ namespace EL_SAPO_GestionAgua.Forms
                 ForeColor = Color.FromArgb(192, 57, 43),
                 UseVisualStyleBackColor = true
             };
+            chkReposicion.CheckedChanged += (s, e) => RecalcularCosto();
             grpDetalles.Controls.Add(chkReposicion);
 
             currentY += grpDetalles.Height + groupSpacing;
+
+            // Panel de botones
+            Panel pnlBotones = new Panel()
+            {
+                Location = new Point(0, currentY),
+                Size = new Size(520, 80),
+                BackColor = Color.Transparent
+            };
+            mainPanel.Controls.Add(pnlBotones);
 
             // Botón generar factura
             btnGenerar = new Button()
             {
                 Text = "🧾 GENERAR FACTURA",
-                Location = new Point(0, currentY),
-                Size = new Size(520, 45),
+                Location = new Point(0, 0),
+                Size = new Size(520, 35),
                 Font = new Font("Segoe UI", 12F, FontStyle.Bold),
                 BackColor = Color.FromArgb(231, 76, 60),
                 ForeColor = Color.White,
@@ -243,7 +267,26 @@ namespace EL_SAPO_GestionAgua.Forms
             btnGenerar.FlatAppearance.BorderSize = 0;
             btnGenerar.FlatAppearance.MouseOverBackColor = Color.FromArgb(192, 57, 43);
             btnGenerar.Click += BtnGenerar_Click;
-            mainPanel.Controls.Add(btnGenerar);
+            pnlBotones.Controls.Add(btnGenerar);
+
+            // NUEVO: Botón imprimir factura
+            btnImprimir = new Button()
+            {
+                Text = "🖨️ IMPRIMIR FACTURA PDF",
+                Location = new Point(0, 40),
+                Size = new Size(520, 35),
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                BackColor = Color.FromArgb(39, 174, 96),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false,
+                Enabled = false
+            };
+            btnImprimir.FlatAppearance.BorderSize = 0;
+            btnImprimir.FlatAppearance.MouseOverBackColor = Color.FromArgb(46, 204, 113);
+            btnImprimir.Click += BtnImprimir_Click;
+            pnlBotones.Controls.Add(btnImprimir);
         }
 
         private GroupBox CreateStyledGroupBox(string text, int y, int width)
@@ -298,7 +341,7 @@ namespace EL_SAPO_GestionAgua.Forms
             };
         }
 
-        // ===== LÓGICA ORIGINAL SIN MODIFICACIONES =====
+        // ===== MÉTODOS DE EVENTOS =====
 
         private void BtnBuscar_Click(object sender, EventArgs e)
         {
@@ -311,6 +354,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 return;
             }
 
+            clienteActual = cliente;
             lblClienteInfo.Text = $"✅ Cliente: {cliente.Nombres} {cliente.Apellidos}";
             lblClienteInfo.ForeColor = Color.FromArgb(39, 174, 96);
             MessageBox.Show($"Cliente encontrado: {cliente.Nombres} {cliente.Apellidos}", "Cliente Encontrado", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -322,45 +366,79 @@ namespace EL_SAPO_GestionAgua.Forms
             {
                 txtLecturaAnterior.ReadOnly = false;
                 txtLecturaAnterior.BackColor = Color.White;
-                txtLecturaAnterior.Text = ""; // permitir ingreso manual
+                txtLecturaAnterior.Text = "";
             }
             else
             {
                 txtLecturaAnterior.ReadOnly = true;
                 txtLecturaAnterior.BackColor = Color.FromArgb(236, 240, 241);
-                txtLecturaAnterior.Text = cliente.UltimaLectura.ToString(); // autocompletado
+                txtLecturaAnterior.Text = cliente.UltimaLectura.ToString();
             }
+
+            // Recalcular costo al cambiar cliente
+            RecalcularCosto();
         }
 
         private void TxtLecturaActual_TextChanged(object sender, EventArgs e)
         {
+            RecalcularCosto();
+        }
+
+        private void TxtMantenimiento_TextChanged(object sender, EventArgs e)
+        {
+            RecalcularCosto();
+        }
+
+        private void RecalcularCosto()
+        {
             if (int.TryParse(txtLecturaAnterior.Text, out int anterior) &&
-                int.TryParse(txtLecturaActual.Text, out int actual))
+                int.TryParse(txtLecturaActual.Text, out int actual) &&
+                decimal.TryParse(txtMantenimiento.Text, out decimal mantenimiento))
             {
+                if (actual < anterior)
+                {
+                    pnlResultados.Visible = false;
+                    return;
+                }
+
                 int consumo = actual - anterior;
-                decimal costo = FacturacionService.CalcularCosto(consumo, false, chkReposicion.Checked);
+
+                // Verificar si debe aplicar mora usando el nuevo método
+                bool conMora = clienteActual != null ? FacturacionService.DebeAplicarMora(clienteActual.DNI) : false;
+
+                decimal costo = FacturacionService.CalcularCosto(consumo, conMora, chkReposicion.Checked, mantenimiento);
 
                 lblConsumo.Text = $"Consumo: {consumo} m³";
-                lblCosto.Text = $"Costo: S/ {costo:N2}";
 
-                // Mostrar el panel de resultados con animación
+                string textoMora = conMora ? " (CON MORA)" : "";
+                lblCosto.Text = $"Costo: S/ {costo:N2}{textoMora}";
+
+                // Mostrar el panel de resultados
                 pnlResultados.Visible = true;
 
-                // Cambiar color según el consumo
-                if (consumo > 50) // Alto consumo
+                // Cambiar color según el consumo y mora
+                if (conMora)
                 {
-                    pnlResultados.BackColor = Color.FromArgb(231, 76, 60);
+                    pnlResultados.BackColor = Color.FromArgb(192, 57, 43); // Rojo por mora
                 }
-                else if (consumo > 20) // Consumo medio
+                else if (consumo > 50)
                 {
-                    pnlResultados.BackColor = Color.FromArgb(243, 156, 18);
+                    pnlResultados.BackColor = Color.FromArgb(231, 76, 60); // Alto consumo
                 }
-                else // Consumo bajo
+                else if (consumo > 20)
                 {
-                    pnlResultados.BackColor = Color.FromArgb(46, 204, 113);
+                    pnlResultados.BackColor = Color.FromArgb(243, 156, 18); // Consumo medio
+                }
+                else if (consumo <= 2)
+                {
+                    pnlResultados.BackColor = Color.FromArgb(52, 152, 219); // Consumo mínimo (solo mantenimiento)
+                }
+                else
+                {
+                    pnlResultados.BackColor = Color.FromArgb(46, 204, 113); // Consumo bajo
                 }
 
-                pnlResultados.Invalidate(); // Forzar repintado
+                pnlResultados.Invalidate();
             }
             else
             {
@@ -390,6 +468,12 @@ namespace EL_SAPO_GestionAgua.Forms
                 return;
             }
 
+            if (!decimal.TryParse(txtMantenimiento.Text, out decimal mantenimiento) || mantenimiento < 0)
+            {
+                MessageBox.Show("El costo de mantenimiento debe ser un valor válido.", "Error de Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             // Obtener el período, manejando el placeholder
             string periodo = txtPeriodo.Text == "Ej: Junio 2025" ? "" : txtPeriodo.Text;
 
@@ -402,8 +486,10 @@ namespace EL_SAPO_GestionAgua.Forms
                 FechaEmision = DateTime.Now,
                 FechaVencimiento = dtpVencimiento.Value,
                 Observaciones = txtObservaciones.Text,
-                AplicarReposicion = chkReposicion.Checked
-            });
+                AplicarReposicion = chkReposicion.Checked,
+                NombreCompleto = $"{cliente.Nombres} {cliente.Apellidos}",
+                Direccion = cliente.Direccion
+            }, mantenimiento);
 
             // Solo actualiza última lectura si NO es la primera factura
             if (!esPrimeraFactura)
@@ -411,7 +497,42 @@ namespace EL_SAPO_GestionAgua.Forms
                 UsuarioService.ActualizarLectura(factura.DNICliente, factura.LecturaActual);
             }
 
-            MessageBox.Show($"Factura generada exitosamente:\n\nTotal a Pagar: S/ {factura.TotalDeuda:N2}", "Factura Generada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ultimaFacturaGenerada = factura;
+            btnImprimir.Enabled = true;
+
+            MessageBox.Show($"Factura generada exitosamente:\n\nRecibo N°: {factura.NumeroRecibo}\nTotal a Pagar: S/ {factura.TotalDeuda:N2}",
+                "Factura Generada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void BtnImprimir_Click(object sender, EventArgs e)
+        {
+            if (ultimaFacturaGenerada == null || clienteActual == null)
+            {
+                MessageBox.Show("No hay ninguna factura para imprimir. Genere una factura primero.",
+                    "Sin Factura", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var result = MessageBox.Show("¿Desea guardar la factura como PDF o enviarla directamente a la impresora?",
+                "Opciones de Impresión", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                // Guardar como PDF
+                SaveFileDialog saveDialog = new SaveFileDialog();
+                saveDialog.Filter = "Archivos PDF (*.pdf)|*.pdf";
+                saveDialog.FileName = $"Factura_{ultimaFacturaGenerada.NumeroRecibo}_{DateTime.Now:yyyyMMdd}.pdf";
+
+                if (saveDialog.ShowDialog() == DialogResult.OK)
+                {
+                    PDFService.GuardarComoPDF(ultimaFacturaGenerada, clienteActual, saveDialog.FileName);
+                }
+            }
+            else if (result == DialogResult.No)
+            {
+                // Imprimir directamente
+                PDFService.ImprimirFactura(ultimaFacturaGenerada, clienteActual);
+            }
         }
     }
 }

@@ -10,7 +10,8 @@ namespace EL_SAPO_GestionAgua.Services
 {
     public class PagoService
     {
-        public static void RegistrarPago(Factura factura, string metodo)
+        // MÉTODO MODIFICADO: Ahora retorna el objeto Pago para poder usarlo en la impresión
+        public static Pago RegistrarPago(Factura factura, string metodo)
         {
             var pago = new Pago
             {
@@ -23,6 +24,8 @@ namespace EL_SAPO_GestionAgua.Services
 
             PagoRepository.AgregarPago(pago);
             FacturaRepository.MarcarComoPagada(factura.NumeroRecibo);
+
+            return pago; // NUEVO: Retorna el pago para poder imprimirlo
         }
     }
 }

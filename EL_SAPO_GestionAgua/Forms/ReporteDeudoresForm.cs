@@ -307,6 +307,10 @@ namespace EL_SAPO_GestionAgua.Forms
             AddHoverEffect(btnExportarPDF, Color.FromArgb(211, 47, 47), Color.FromArgb(244, 67, 54));
             AddHoverEffect(btnExportarExcel, Color.FromArgb(56, 142, 60), Color.FromArgb(76, 175, 80));
 
+            // Mostrar todos los deudores al cargar el formulario
+            deudores = ReporteService.ObtenerDeudores("");  // o null si el método lo permite
+            dgvReporte.DataSource = deudores;
+
             // Agregar controles al formulario
             this.Controls.AddRange(new Control[] {
                 panelHeader,
@@ -325,7 +329,17 @@ namespace EL_SAPO_GestionAgua.Forms
         private void BtnBuscar_Click(object sender, EventArgs e)
         {
             string filtro = txtFiltro.Text.Trim();
-            deudores = ReporteService.ObtenerDeudores(filtro);
+            if (string.IsNullOrEmpty(filtro))
+            {
+                // Mostrar todos si no hay filtro
+                deudores = ReporteService.ObtenerDeudores("");
+            }
+            else
+            {
+                // Filtrar por DNI o nombre
+                deudores = ReporteService.ObtenerDeudores(filtro);
+            }
+            dgvReporte.DataSource = null; // Forzar refresh
             dgvReporte.DataSource = deudores;
         }
     }
