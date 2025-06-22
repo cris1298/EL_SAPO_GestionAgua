@@ -1,13 +1,18 @@
 ﻿using EL_SAPO_GestionAgua.Data;
 using EL_SAPO_GestionAgua.Models;
 using EL_SAPO_GestionAgua.Services;
+using iTextSharp.text;
+using iTextSharp.text.pdf;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Printing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Xml.Linq;
 
 namespace EL_SAPO_GestionAgua.Forms
 {
@@ -15,11 +20,12 @@ namespace EL_SAPO_GestionAgua.Forms
     {
         private TextBox txtDNI;
         private ListBox lstFacturas;
-        private Button btnBuscar, btnPagar;
+        private Button btnBuscar, btnPagar, btnImprimirRecibo;
         private Label lblSeleccionado, lblTotalDeuda, lblClienteInfo;
         private GroupBox grpBusqueda, grpFacturas, grpPago;
         private Panel pnlResumen;
         private List<Factura> facturasPendientes = new List<Factura>();
+        private Pago ultimoPagoRealizado = null;
 
         public GestionPagosForm()
         {
@@ -31,12 +37,12 @@ namespace EL_SAPO_GestionAgua.Forms
         {
             // Configuración principal del formulario
             this.Text = "💰 Gestión de Pagos";
-            this.Size = new Size(650, 700);
+            this.Size = new Size(650, 750); // Aumentado para el nuevo botón
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.BackColor = Color.FromArgb(236, 240, 241);
-            this.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
+            this.Font = new System.Drawing.Font("Segoe UI", 9F, FontStyle.Regular);
 
             // Panel principal con padding
             Panel mainPanel = new Panel()
@@ -54,7 +60,7 @@ namespace EL_SAPO_GestionAgua.Forms
             Label titleLabel = new Label()
             {
                 Text = "GESTIÓN DE PAGOS",
-                Font = new Font("Segoe UI", 16F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 16F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(44, 62, 80),
                 AutoSize = true,
                 Location = new Point(0, currentY)
@@ -64,7 +70,7 @@ namespace EL_SAPO_GestionAgua.Forms
             Label subtitleLabel = new Label()
             {
                 Text = "Consulta y registra pagos de facturas pendientes",
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+                Font = new System.Drawing.Font("Segoe UI", 10F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(127, 140, 141),
                 AutoSize = true,
                 Location = new Point(0, currentY + 25)
@@ -81,7 +87,7 @@ namespace EL_SAPO_GestionAgua.Forms
             grpBusqueda.Controls.Add(lblDNI);
 
             txtDNI = CreateStyledTextBox(20, 45, 200);
-            txtDNI.Font = new Font("Consolas", 11F, FontStyle.Bold);
+            txtDNI.Font = new System.Drawing.Font("Consolas", 11F, FontStyle.Bold);
             txtDNI.TextAlign = HorizontalAlignment.Center;
             grpBusqueda.Controls.Add(txtDNI);
 
@@ -97,7 +103,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Location = new Point(20, 85),
                 Size = new Size(550, 20),
                 ForeColor = Color.FromArgb(127, 140, 141),
-                Font = new Font("Segoe UI", 9F, FontStyle.Italic)
+                Font = new System.Drawing.Font("Segoe UI", 9F, FontStyle.Italic)
             };
             grpBusqueda.Controls.Add(lblClienteInfo);
 
@@ -112,7 +118,7 @@ namespace EL_SAPO_GestionAgua.Forms
             {
                 Location = new Point(20, 25),
                 Size = new Size(550, 200),
-                Font = new Font("Consolas", 10F),
+                Font = new System.Drawing.Font("Consolas", 10F),
                 BackColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
                 SelectionMode = SelectionMode.One,
@@ -142,7 +148,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Location = new Point(20, 15),
                 Size = new Size(550, 20),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 10F, FontStyle.Bold),
                 BackColor = Color.Transparent
             };
             pnlResumen.Controls.Add(lblSeleccionado);
@@ -153,15 +159,16 @@ namespace EL_SAPO_GestionAgua.Forms
                 Location = new Point(20, 45),
                 Size = new Size(200, 25),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 14F, FontStyle.Bold),
                 BackColor = Color.Transparent
             };
             pnlResumen.Controls.Add(lblTotalDeuda);
 
             currentY += pnlResumen.Height + groupSpacing;
 
-            // Grupo: Registro de Pago
+            // Grupo: Registro de Pago (AUMENTADO LA ALTURA)
             grpPago = CreateStyledGroupBox("💳 Registro de Pago", currentY, 590);
+            grpPago.Height = 160; // Aumentado para acomodar el nuevo botón
             mainPanel.Controls.Add(grpPago);
 
             // Instrucciones
@@ -171,7 +178,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Location = new Point(20, 25),
                 Size = new Size(550, 20),
                 ForeColor = Color.FromArgb(127, 140, 141),
-                Font = new Font("Segoe UI", 9F, FontStyle.Italic)
+                Font = new System.Drawing.Font("Segoe UI", 9F, FontStyle.Italic)
             };
             grpPago.Controls.Add(lblInstrucciones);
 
@@ -181,7 +188,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Text = "💰 REGISTRAR PAGO",
                 Location = new Point(20, 55),
                 Size = new Size(550, 45),
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 12F, FontStyle.Bold),
                 BackColor = Color.FromArgb(46, 204, 113),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -193,20 +200,39 @@ namespace EL_SAPO_GestionAgua.Forms
             btnPagar.FlatAppearance.MouseOverBackColor = Color.FromArgb(39, 174, 96);
             btnPagar.Click += BtnPagar_Click;
             grpPago.Controls.Add(btnPagar);
+
+            // NUEVO: Botón de imprimir recibo
+            btnImprimirRecibo = new Button()
+            {
+                Text = "🖨️ IMPRIMIR RECIBO DE PAGO",
+                Location = new Point(20, 110),
+                Size = new Size(550, 35),
+                Font = new System.Drawing.Font("Segoe UI", 11F, FontStyle.Bold),
+                BackColor = Color.FromArgb(155, 89, 182),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false,
+                Enabled = false
+            };
+            btnImprimirRecibo.FlatAppearance.BorderSize = 0;
+            btnImprimirRecibo.FlatAppearance.MouseOverBackColor = Color.FromArgb(142, 68, 173);
+            btnImprimirRecibo.Click += BtnImprimirRecibo_Click;
+            grpPago.Controls.Add(btnImprimirRecibo);
         }
 
         private GroupBox CreateStyledGroupBox(string text, int y, int width)
         {
             int height = 120;
             if (text.Contains("Facturas")) height = 240;
-            if (text.Contains("Pago")) height = 120;
+            if (text.Contains("Pago")) height = 160; // Aumentado para el nuevo botón
 
             return new GroupBox()
             {
                 Text = text,
                 Location = new Point(0, y),
                 Size = new Size(width, height),
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(44, 62, 80),
                 BackColor = Color.White,
                 FlatStyle = FlatStyle.Flat
@@ -220,7 +246,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Text = text,
                 Location = new Point(x, y),
                 AutoSize = true,
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+                Font = new System.Drawing.Font("Segoe UI", 9F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(52, 73, 94)
             };
         }
@@ -231,7 +257,7 @@ namespace EL_SAPO_GestionAgua.Forms
             {
                 Location = new Point(x, y),
                 Size = new Size(width, 30),
-                Font = new Font("Segoe UI", 10F),
+                Font = new System.Drawing.Font("Segoe UI", 10F),
                 BorderStyle = BorderStyle.FixedSingle
             };
         }
@@ -243,7 +269,7 @@ namespace EL_SAPO_GestionAgua.Forms
                 Text = text,
                 Location = new Point(x, y),
                 Size = new Size(width, height),
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Font = new System.Drawing.Font("Segoe UI", 10F, FontStyle.Bold),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
@@ -303,7 +329,7 @@ namespace EL_SAPO_GestionAgua.Forms
             }
         }
 
-        // ===== LÓGICA ORIGINAL SIN MODIFICACIONES =====
+        // ===== LÓGICA ORIGINAL CON MODIFICACIONES PARA PDF =====
 
         private void BtnBuscar_Click(object sender, EventArgs e)
         {
@@ -329,6 +355,9 @@ namespace EL_SAPO_GestionAgua.Forms
                 lblClienteInfo.ForeColor = Color.FromArgb(231, 76, 60);
                 pnlResumen.Visible = false;
                 btnPagar.Enabled = false;
+                // Solo deshabilitar si no hay pago reciente
+                if (ultimoPagoRealizado == null)
+                    btnImprimirRecibo.Enabled = false;
                 MessageBox.Show("No hay facturas pendientes.", "Sin Resultados", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -373,6 +402,9 @@ namespace EL_SAPO_GestionAgua.Forms
                 lblSeleccionado.Text = "Ninguna factura seleccionada";
                 pnlResumen.Visible = false;
                 btnPagar.Enabled = false;
+                // NO deshabilitar si hay un pago reciente
+                if (ultimoPagoRealizado == null)
+                    btnImprimirRecibo.Enabled = false;
             }
         }
 
@@ -402,10 +434,174 @@ namespace EL_SAPO_GestionAgua.Forms
 
             if (result == DialogResult.Yes)
             {
-                PagoService.RegistrarPago(facturaSeleccionada, "Efectivo");
+                // MODIFICADO: Guardar el pago realizado para poder imprimirlo
+                ultimoPagoRealizado = PagoService.RegistrarPago(facturaSeleccionada, "Efectivo");
+
                 MessageBox.Show($"✅ Pago registrado exitosamente\n\nRecibo: {facturaSeleccionada.NumeroRecibo}\nTotal Pagado: S/ {facturaSeleccionada.TotalDeuda:N2}", "Pago Registrado", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                BtnBuscar_Click(null, null); // Refrescar lista
+
+                // Habilitar el botón de imprimir después del pago
+                btnImprimirRecibo.Enabled = true;
+
+                // Refrescar lista pero mantener el botón habilitado
+                string dniActual = txtDNI.Text;
+                BtnBuscar_Click(null, null);
+                btnImprimirRecibo.Enabled = true; // Asegurar que quede habilitado
             }
+        }
+
+        // ===== NUEVA FUNCIONALIDAD: IMPRESIÓN DE RECIBO PDF =====
+
+        private void BtnImprimirRecibo_Click(object sender, EventArgs e)
+        {
+            if (ultimoPagoRealizado == null)
+            {
+                MessageBox.Show("No hay ningún pago reciente para imprimir.", "Sin Pago", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                // Mostrar diálogo para guardar el archivo
+                SaveFileDialog saveDialog = new SaveFileDialog()
+                {
+                    Filter = "Archivos PDF (*.pdf)|*.pdf",
+                    FileName = $"Recibo_Pago_{ultimoPagoRealizado.NumeroRecibo}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf",
+                    Title = "Guardar Recibo de Pago"
+                };
+
+                if (saveDialog.ShowDialog() == DialogResult.OK)
+                {
+                    GenerarReciboPDF(ultimoPagoRealizado, saveDialog.FileName);
+
+                    DialogResult abrirArchivo = MessageBox.Show(
+                        "✅ Recibo generado exitosamente.\n\n¿Desea abrir el archivo PDF?",
+                        "Recibo Generado",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information
+                    );
+
+                    if (abrirArchivo == DialogResult.Yes)
+                    {
+                        System.Diagnostics.Process.Start(saveDialog.FileName);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al generar el recibo: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void GenerarReciboPDF(Pago pago, string rutaArchivo)
+        {
+            // Crear documento PDF
+            Document document = new Document(PageSize.A4, 50, 50, 50, 50);
+            PdfWriter writer = PdfWriter.GetInstance(document, new FileStream(rutaArchivo, FileMode.Create));
+
+            document.Open();
+
+            // Fuentes
+            iTextSharp.text.Font fontTitulo = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 18, BaseColor.BLUE);
+            iTextSharp.text.Font fontSubtitulo = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.BLACK);
+            iTextSharp.text.Font fontNormal = FontFactory.GetFont(FontFactory.HELVETICA, 12, BaseColor.BLACK);
+            iTextSharp.text.Font fontPequeño = FontFactory.GetFont(FontFactory.HELVETICA, 10, BaseColor.GRAY);
+
+            // Encabezado de la empresa
+            Paragraph empresa = new Paragraph("EL SAPO - GESTIÓN DE AGUA", fontTitulo);
+            empresa.Alignment = Element.ALIGN_CENTER;
+            document.Add(empresa);
+
+            Paragraph direccion = new Paragraph("Sistema de Gestión de Servicios de Agua\nAv. Principal 123, Ciudad\nTeléfono: (01) 123-4567", fontPequeño);
+            direccion.Alignment = Element.ALIGN_CENTER;
+            direccion.SpacingAfter = 20;
+            document.Add(direccion);
+
+            // Línea separadora - CORREGIDO
+            iTextSharp.text.pdf.draw.LineSeparator linea = new iTextSharp.text.pdf.draw.LineSeparator();
+            document.Add(new iTextSharp.text.Chunk(linea));
+            document.Add(iTextSharp.text.Chunk.NEWLINE);
+
+            // Título del recibo
+            Paragraph tituloRecibo = new Paragraph("RECIBO DE PAGO", fontSubtitulo);
+            tituloRecibo.Alignment = Element.ALIGN_CENTER;
+            tituloRecibo.SpacingAfter = 20;
+            document.Add(tituloRecibo);
+
+            // Información del recibo
+            PdfPTable tablaInfo = new PdfPTable(2);
+            tablaInfo.WidthPercentage = 100;
+            tablaInfo.SetWidths(new float[] { 30f, 70f });
+
+            // Obtener información del cliente (buscar en facturas)
+            var factura = FacturaRepository.ObtenerPorNumero(pago.NumeroRecibo);
+            string nombreCliente = "Cliente No Encontrado";
+            string periodo = "N/A";
+
+            if (factura != null)
+            {
+                // Aquí deberías obtener el nombre del cliente desde ClienteRepository
+                // nombreCliente = ClienteRepository.ObtenerPorDNI(factura.DNICliente)?.Nombre ?? "Cliente No Encontrado";
+                nombreCliente = $"Cliente DNI: {factura.DNICliente}"; // Temporal
+                periodo = factura.Periodo;
+            }
+
+            AgregarFilaTabla(tablaInfo, "N° Recibo:", pago.NumeroRecibo.ToString(), fontNormal);
+            AgregarFilaTabla(tablaInfo, "Fecha de Pago:", pago.FechaPago.ToString("dd/MM/yyyy HH:mm"), fontNormal);
+            AgregarFilaTabla(tablaInfo, "Cliente:", nombreCliente, fontNormal);
+            AgregarFilaTabla(tablaInfo, "DNI:", pago.DNICliente, fontNormal);
+            AgregarFilaTabla(tablaInfo, "Período:", periodo, fontNormal);
+            AgregarFilaTabla(tablaInfo, "Método de Pago:", pago.MetodoPago, fontNormal);
+
+            document.Add(tablaInfo);
+            document.Add(iTextSharp.text.Chunk.NEWLINE);
+
+            // Monto pagado (destacado)
+            PdfPTable tablaMonto = new PdfPTable(1);
+            tablaMonto.WidthPercentage = 100;
+
+            PdfPCell celdaMonto = new PdfPCell(new Phrase($"MONTO PAGADO: S/ {pago.MontoPagado:N2}", FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 16, BaseColor.GREEN)));
+            celdaMonto.HorizontalAlignment = Element.ALIGN_CENTER;
+            celdaMonto.Padding = 15;
+            celdaMonto.BackgroundColor = new BaseColor(240, 248, 255);
+            tablaMonto.AddCell(celdaMonto);
+
+            document.Add(tablaMonto);
+            document.Add(iTextSharp.text.Chunk.NEWLINE);
+
+            // Nota al pie - CORREGIDO: cambiamos ALIGN_JUSTIFY por ALIGN_LEFT
+            Paragraph nota = new Paragraph("IMPORTANTE: Conserve este recibo como comprobante de pago. " +
+                "Este documento es válido como constancia de cancelación del servicio de agua.", fontPequeño);
+            nota.Alignment = Element.ALIGN_LEFT; // Cambiado de ALIGN_JUSTIFY
+            nota.SpacingBefore = 30;
+            document.Add(nota);
+
+            // Firma y fecha de generación
+            Paragraph fechaGeneracion = new Paragraph($"Documento generado el: {DateTime.Now:dd/MM/yyyy HH:mm:ss}", fontPequeño);
+            fechaGeneracion.Alignment = Element.ALIGN_RIGHT;
+            fechaGeneracion.SpacingBefore = 40;
+            document.Add(fechaGeneracion);
+
+            // Código de verificación (simulado)
+            string codigoVerificacion = $"VER-{pago.Id:D6}-{DateTime.Now:yyyyMMdd}";
+            Paragraph verificacion = new Paragraph($"Código de verificación: {codigoVerificacion}", fontPequeño);
+            verificacion.Alignment = Element.ALIGN_RIGHT;
+            document.Add(verificacion);
+
+            document.Close();
+        }
+
+        private void AgregarFilaTabla(PdfPTable tabla, string etiqueta, string valor, iTextSharp.text.Font fuente)
+        {
+            PdfPCell celdaEtiqueta = new PdfPCell(new Phrase(etiqueta, FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 12)));
+            celdaEtiqueta.Border = iTextSharp.text.Rectangle.NO_BORDER; // Especificamos el namespace completo
+            celdaEtiqueta.PaddingBottom = 8;
+
+            PdfPCell celdaValor = new PdfPCell(new Phrase(valor, fuente));
+            celdaValor.Border = iTextSharp.text.Rectangle.NO_BORDER; // Especificamos el namespace completo
+            celdaValor.PaddingBottom = 8;
+
+            tabla.AddCell(celdaEtiqueta);
+            tabla.AddCell(celdaValor);
         }
     }
 }

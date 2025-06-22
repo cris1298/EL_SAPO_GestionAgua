@@ -14,12 +14,10 @@ namespace EL_SAPO_GestionAgua.Services
         {
             var facturas = FacturaRepository.ObtenerPorDNI(dni);
             var resultado = new List<object>();
-
             foreach (var f in facturas)
             {
                 string estado;
                 var hoy = DateTime.Now;
-
                 if (f.TotalDeuda <= 0)
                     estado = "Pagado";
                 else if (hoy > f.FechaVencimiento)
@@ -37,38 +35,74 @@ namespace EL_SAPO_GestionAgua.Services
                     Fecha = f.FechaEmision.ToShortDateString()
                 });
             }
-
             return resultado;
         }
-        public static decimal CalcularCosto(int consumo, bool conMora, bool conReposicion)
+
+        public static decimal CalcularCosto(int consumo, bool conMora, bool conReposicion, decimal costoMantenimiento = 1.00m)
         {
             decimal costo = 0;
 
-            if (!conMora)
+            // Si el consumo está entre 0 y 2 m³, solo se cobra mantenimiento
+            if (consumo >= 0 && consumo <= 2)
             {
-                if (consumo <= 15)
-                    costo = consumo * 0.50m;
-                else
-                    costo = 15 * 0.50m + (consumo - 15) * 1.50m;
+                costo = costoMantenimiento;
             }
             else
             {
-                costo = consumo * 2.00m * 2; // doble consumo, tarifa de mora
+                // Cálculo normal de consumo
+                if (!conMora)
+                {
+                    if (consumo <= 15)
+                        costo = consumo * 0.50m;
+                    else
+                        costo = 15 * 0.50m + (consumo - 15) * 1.50m;
+                }
+                else
+                {
+                    costo = consumo * 2.00m * 2; // doble consumo, tarifa de mora
+                }
+
+                // Agregar mantenimiento
+                costo += costoMantenimiento;
             }
 
-            costo += 1.00m; // mantenimiento fijo
-
+            // Agregar costo de reposición si aplica
             if (conReposicion)
                 costo += 150.00m;
 
             return costo;
         }
 
-        public static Factura GenerarFactura(Factura datos)
+        public static bool DebeAplicarMora(string dniCliente)
+        {
+            var facturasPendientes = FacturaRepository.ObtenerPendientesPorDNI(dniCliente);
+
+            // Si no hay facturas pendientes, no hay mora
+            if (facturasPendientes.Count == 0)
+                return false;
+
+            // Buscar la factura pendiente más antigua
+            var facturaVencidaMasAntigua = facturasPendientes
+                .Where(f => f.FechaVencimiento < DateTime.Now)
+                .OrderBy(f => f.FechaVencimiento)
+                .FirstOrDefault();
+
+            if (facturaVencidaMasAntigua == null)
+                return false;
+
+            // Verificar si han pasado 3 meses desde el vencimiento
+            var fechaLimiteMora = facturaVencidaMasAntigua.FechaVencimiento.AddMonths(3);
+            return DateTime.Now > fechaLimiteMora;
+        }
+
+        public static Factura GenerarFactura(Factura datos, decimal costoMantenimiento = 1.00m)
         {
             int consumo = datos.LecturaActual - datos.LecturaAnterior;
-            bool conMora = DateTime.Now > datos.FechaVencimiento;
-            decimal costo = CalcularCosto(consumo, conMora, datos.AplicarReposicion);
+
+            // Verificar si debe aplicar mora (3 meses después del vencimiento)
+            bool conMora = DebeAplicarMora(datos.DNICliente);
+
+            decimal costo = CalcularCosto(consumo, conMora, datos.AplicarReposicion, costoMantenimiento);
 
             var factura = new Factura
             {
@@ -83,13 +117,13 @@ namespace EL_SAPO_GestionAgua.Services
                 FechaEmision = DateTime.Now,
                 FechaVencimiento = datos.FechaVencimiento,
                 Observaciones = datos.Observaciones,
-                AplicarReposicion = datos.AplicarReposicion
+                AplicarReposicion = datos.AplicarReposicion,
+                NombreCompleto = datos.NombreCompleto,
+                Direccion = datos.Direccion
             };
 
             FacturaRepository.AgregarFactura(factura);
             return factura;
         }
-
     }
-
 }
